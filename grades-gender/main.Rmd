@@ -1,0 +1,249 @@
+---
+title: "Undergraduate Performance Analysis"
+author: "Tamseel Ahmad"
+date: "2024-05-01"
+---
+
+## Introduction
+
+In most Pakistani universities, marks achieved in Higher Secondary education are given a high weightage in merit calculation for admissions in undergraduate programs. In this analysis, I aim to identify the correlation between percentage marks achieved in Higher Secondary Certificate (intermediate or grade 11-12 exams) and cumulative GPA of final-year undergraduate students. More specifically, I am interested to find out if this correlation statistically differs among the gender groups.
+
+## Dataset
+
+The dataset being used comprises of grade metrics for undergraduate students of a large public-sector university with diverse student-body in Lahore, Pakistan. The data was self-submitted by students but cross-verified by their respective departments.
+
+Limitations: The data is not collectively exhaustive and students with lower performance were less likely to submit their data than those with higher performance.
+
+## Analysis
+
+### Data Cleaning
+
+We start our analysis by loading packages and importing data.
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(janitor)
+library(cocor)
+library(ggExtra)
+library(cowplot)
+```
+
+```{r}
+grades <- read_csv("grades.csv", col_types = "ifffdd") |>
+  clean_names()
+```
+
+```{r}
+head(grades)
+```
+
+Let us look into basic **descriptive statistics** of the data.
+
+```{r}
+summary(grades[,-1])
+```
+
+The dataset includes observations of undergraduate students across different years of study. The ideal indicator for undergraduate performance should be the final GPA of graduating students but since we don't have that data, we use CGPA for final-year students. Hence, filtering the data to keep only those students who are in their final years:
+
+```{r}
+grades <- grades |>
+  filter(as.character(year_of_student) == as.character(program_duration))
+```
+
+Let us now look again at the descriptive stats:
+
+```{r}
+summary(grades[,-1])
+```
+
+The minimum value of 0.74 cgpa seems odd. We can get a better overview of such outliers through a scatterplot:
+
+```{r}
+ggplot(grades) +
+  geom_point(aes(x=hsc_percentage, y=cgpa))
+```
+
+We can note two observations where cgpa\<1 and a few more where cgpa\<2. Failure to maintain CGPA of 1.7 results in drop out as per university regulations. Counting such observations:
+
+```{r}
+grades |> filter(cgpa < 1.7) |> nrow()
+```
+
+These 6 observations where CGPA \< 1.7 are likely to be data entry error. Therefore, removing these observations:
+
+```{r}
+grades <- grades |> filter(cgpa >= 1.7)
+```
+
+```{r}
+nrow(grades)
+```
+
+So, our final dataframe consists of 2304 observations, on which we will perform our analysis.
+
+### Visualization
+
+Now, that our data is cleaned, we can have a visual inspection. Firstly, we visualize the distribution of the HSC Percentage & CGPA among the two gender groups using box plots:
+
+```{r}
+p1 <- grades |>
+  ggplot(aes(x=gender, 
+             y=hsc_percentage, 
+             fill=gender)) +
+    geom_boxplot()+
+    labs(title = "HSC Percentage")
+
+p2 <- grades |>
+  ggplot(aes(x=gender, 
+             y=cgpa, 
+             fill=gender)) +
+    geom_boxplot()+
+    labs(title = "CGPA")
+
+style <- theme_bw() + 
+  theme(legend.position = "none",
+        axis.title.x = element_blank(),
+        axis.title.y = element_blank())
+
+p3 <- plot_grid(p1+style ,p2+style)
+
+print(p3)
+```
+
+So that is how our data looks like.\
+...\
+...\
+...
+
+Okay, I admit. Box plots are overrated.
+
+Since both variables of our interest are continuous, density plots will be more appropriate. Instead of plain density plots, we use *Marginal Density Plots* above a scatterplot to inspect the relationship between the two variables as well.
+
+```{r}
+p4 <- grades |>
+  ggplot(aes(x = hsc_percentage,
+             y = cgpa,
+             color = gender)) +
+  geom_point(size=0.8) +
+  labs(x = "HSC Percentage", y = "CGPA") +
+  theme_bw() +
+  theme(legend.position = "bottom",
+        legend.title = element_blank())
+
+p5 <- ggMarginal(p4, type = "density", groupColour = TRUE, groupFill = TRUE)
+
+print(p5)
+```
+
+From the visualization, we can note that:
+
+-   a weak/moderate positive relationship exists between CGPA and HSC Percentage
+-   median values for both CGPA and HSC Percentage are higher in females than in males
+-   distributions are not perfectly normal but negatively skewed[^1]
+
+[^1]: Non-normal distribution can affect the validity of results of test-statistics. However, since the data is not substantially non-normal, it does not pose a significant threat to our analysis. 
+
+### Hypothesis Testing
+
+The specific goal of this analysis is to identify whether the correlation between HSC Percentage and CGPA is statistically different among the two gender groups: male and female.
+
+So, we will subset our dataframe based on the gender groups:
+
+```{r}
+df_female  <- subset(grades, gender == "Female")
+df_male    <- subset(grades, gender == "Male")
+```
+
+and then compute the mentioned correlations separately among the both groups:
+
+```{r}
+cor_female <- cor(df_female$hsc_percentage, df_female$cgpa)
+cor_male   <- cor(df_male$hsc_percentage,   df_male$cgpa)
+
+n_female   <- nrow(df_female)
+n_male     <- nrow(df_male)
+
+```
+
+```{r}
+print(cor_female)
+print(cor_male)
+```
+
+Now, we want to test if *cor_female* is **statistically different** from *cor_male*.
+
+-   Null Hypothesis : cor_female = cor_male
+
+-   Alternative Hypothesis : cor_female ≠ cor_male
+
+To compare these two correlations, we first need to stabilize their variance through *Fisher's Transformation*[^2]. It will convert the correlations to their respective z-values, for which we can compute the test-statistic. The resulting t-statistic (or its p-value) will tell us whether Null Hypothesis will be rejected or retained. To perform these calculations, we will use cocor[^3] package in R. Since our computed correlations are of two independent groups, we use cocor.indep.groups() function to perform the calculations. Using it we get following results:
+
+[^2]: Fisher, R.A. (1925). [*Statistical Methods for Research Workers*](https://archive.org/details/statisticalmethoe7fish). Oliver and Boyd (Edinburgh). 
+
+[^3]: Diedenhofen, B. & Musch, J. (2015). [*cocor: A Comprehensive Solution for the Statistical Comparison of Correlations*](https://doi.org/10.1371/journal.pone.0121945). PLOS ONE 10(4): e0121945. 
+
+```{r}
+result     <- cocor.indep.groups(cor_female, cor_male,
+                                   n_female,   n_male)
+print(result)
+```
+
+Interestingly, we have obtained a p-value of 0.079 from which we can conclude:
+
+-   At 5% significance level, null hypothesis is retained that there is no statistical difference between the two correlations.
+
+-   However, at 10% significance level, null hypothesis is rejected.
+
+Since the data in use has some limitations, a stricter control on Type-1 Error[^4] should be maintained. Hence, I prefer the smaller significance level and proceed with the conclusion obtained at 5% i.e. there is no statistical difference between the correlation of HSC Percentage and CGPA among the gender groups.
+
+[^4]: Type-1 Error: Rejecting a null hypothesis when it is true. 
+
+## Takeaways
+
+### Correlation across gender groups
+
+Based on the analysis, we can conclude that using marks obtained in Higher Secondary Certificate as a criteria for selection in undergraduate programs does not create an implicit gender bias in the selection process because HSC Percentage is an equally likely predictor of CGPA for both gender groups.
+
+### Weak Correlation
+
+The Pearson's correlation coefficient of 0.227 or 0.296 does not indicate a very strong relationship between HSC Percentage and CGPA. While a significant evidence for the implicit gender bias was not found, this weak correlation raises concern regarding high weightage of HSC marks in undergraduate admission criteria. Further research needs to be performed regarding the predictors of success in undergraduate studies.
+
+### High Variability of CGPA at low HSC Percentage
+
+The scatterplot plotted early on showed us that variation in CGPA Percentage was not constant. Let us have a look at it again:
+
+```{r message=FALSE, warning=FALSE}
+p6 <- grades |>
+  ggplot(aes(x = hsc_percentage, y = cgpa, color = gender)) +
+  geom_point(size = 0.9) +
+  geom_smooth(method = "loess", se = TRUE, fullrange = TRUE) +
+  labs(x = "HSC Percentage", y = "CGPA") +
+  theme_bw() +
+  theme(legend.position = "bottom", legend.title = element_blank())
+
+print(p6)
+```
+
+Although there is high variability in CGPA across all values of HSC Percentage, we can note that the variability in CGPA is substantially higher when HSC Percentage is below 70%. Statistically, this hints at the presence of heteroscedasticity in data. On the other hand, it also sheds light on the conditional probability of achieving a high or low CGPA given the HSC Percentage.
+
+For students with high HSC marks, the conditional probability of achieving a high CGPA is higher. However, for students with low HSC marks, the conditional probability of achieving a high or low CGPA is nearly equal.
+
+As the data limitations were noted earlier, this observation could be attributed to self-selection bias, where students with low CGPA (who may have had low HSC Percentage) were less likely to submit their data. Consequently, due to missing data points, the positive correlation may no longer hold for HSC Percentages lower than 70%. Nonetheless, this phenomenon needs to be further investigated for reliable conclusions to be drawn.
+
+## Further Research
+
+This analysis highlights following areas for further research:
+
+-   Finding appropriate predictors of undergraduate performance in context of Pakistan's educational system.
+
+-   Replicating same research with a different and more reliable dataset. Non-rejection of null hypothesis at 10% significance level means that the possibility of an implicit gender bias cannot be confidently ruled out and thus there is need for further investigation.
+
+-   Replicating the same research using a different statistical procedure that accounts for the non-normality of the distributions
+
+-   Testing whether the high variability of CGPA at low HSC Percentage is attributable to the data limitation or does it represent an actually existing pattern.
+
+-   Analyzing differences in performance across provinces to which the students belong.
+
+\_\_\_
+
+Thanks for reading : )
